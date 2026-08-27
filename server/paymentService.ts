@@ -136,7 +136,7 @@ export const paymentService = {
     const sysSettings = await db.getSystemSettings();
     const apiKey = (sysSettings.palplussApiKey || process.env.PALPLUS_API_KEY || '').trim();
     const rawApiUrl = sysSettings.palplussApiUrl || process.env.PALPLUS_API_URL || 'https://api.palpluss.com/v1';
-    const appUrl = (process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '');
+    const appUrl = (process.env.APP_URL || 'https://wifibilling.vercel.app').replace(/\/$/, '');
     const defaultCallbackUrl = `${appUrl}/api/payments/callback`;
     let callbackUrl = (sysSettings.palplussCallbackUrl || process.env.PALPLUS_CALLBACK_URL || defaultCallbackUrl).trim();
     if (!callbackUrl || callbackUrl.includes('localhost') || callbackUrl.includes('127.0.0.1')) {

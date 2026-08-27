@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none">
+  <defs>
+    <linearGradient id="wifi-grad" x1="2" y1="4" x2="30" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="0.8" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded pill for clear contrast in both light & dark browser tabs -->
+  <rect width="32" height="32" rx="7" fill="#0f172a"/>
+  
+  <!-- Outer Signal Wave -->
+  <path d="M 5.5 10.5 C 11.8 4.2 20.2 4.2 26.5 10.5" 
+        stroke="url(#wifi-grad)" 
+        stroke-width="2.75" 
+        stroke-linecap="round" 
+        filter="url(#shadow)"/>
+        
+  <!-- Middle Signal Wave -->
+  <path d="M 9 14.8 C 13.2 10.6 18.8 10.6 23 14.8" 
+        stroke="#38bdf8" 
+        stroke-width="2.75" 
+        stroke-linecap="round" 
+        filter="url(#shadow)"/>
+        
+  <!-- Inner Signal Wave -->
+  <path d="M 12.5 19.2 C 14.5 17.2 17.5 17.2 19.5 19.2" 
+        stroke="#7dd3fc" 
+        stroke-width="2.75" 
+        stroke-linecap="round" 
+        filter="url(#shadow)"/>
+        
+  <!-- Broadcast Center Dot -->
+  <circle cx="16" cy="24" r="2.2" fill="#38bdf8"/>
+</svg>

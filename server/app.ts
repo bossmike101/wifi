@@ -215,7 +215,7 @@ app.all('/api/payments/callback', async (req, res) => {
       status: 'active',
       endpoint: '/api/payments/callback',
       message: 'PalPluss webhook callback endpoint is active and listening for POST notifications.',
-      productionUrl: `${(process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '')}/api/payments/callback`,
+      productionUrl: `${(process.env.APP_URL || 'https://wifibilling.vercel.app').replace(/\/$/, '')}/api/payments/callback`,
       timestamp: new Date().toISOString()
     });
   }
@@ -464,7 +464,7 @@ app.post('/api/router/generate-script', async (req, res) => {
     const portalSettings = await db.getPortalSettings();
     const systemSettings = await db.getSystemSettings();
 
-    const appUrl = (process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '');
+    const appUrl = (process.env.APP_URL || 'https://wifibilling.vercel.app').replace(/\/$/, '');
     const script = mikrotikService.generateSetupScript({
       hotspotInterface: 'wlan1',
       dnsName: 'wifi.login',
