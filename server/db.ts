@@ -100,6 +100,18 @@ let systemSettings: SystemSettings = {
   updatedAt: new Date().toISOString()
 };
 
+let dbInitPromise: Promise<void> | null = null;
+export async function ensureDbInitialized(): Promise<void> {
+  if (!pool) return;
+  if (!dbInitPromise) {
+    dbInitPromise = initializeDatabase().catch(err => {
+      console.warn('Lazy DB initialization notice:', err.message);
+      dbInitPromise = null;
+    });
+  }
+  return dbInitPromise;
+}
+
 // Database Initialization & Migration Helper for PostgreSQL/Neon
 export async function initializeDatabase() {
   if (!pool) return;
@@ -879,21 +891,62 @@ export const db = {
   async getSystemSettings(): Promise<SystemSettings> {
     if (pool) {
       try {
-        const res = await pool.query(
-          `SELECT 
-            id, business_name AS "businessName", business_phone AS "businessPhone", 
-            business_email AS "businessEmail", currency, timezone, 
-            payment_provider AS "paymentProvider", 
-            COALESCE(palpluss_api_key, '') AS "palplussApiKey", 
-            COALESCE(palpluss_api_url, 'https://api.palpluss.com/v1') AS "palplussApiUrl", 
-            COALESCE(palpluss_callback_url, '') AS "palplussCallbackUrl", 
-            COALESCE(palpluss_merchant_id, '') AS "palplussMerchantId", 
-            created_at AS "createdAt", updated_at AS "updatedAt" 
-          FROM system_settings LIMIT 1`
-        );
-        if (res.rows[0]) return res.rows[0];
-      } catch (err) {
-        console.error('DB getSystemSettings error:', err);
+        const res = await pool.query('SELECT * FROM system_settings LIMIT 1');
+        if (res.rows[0]) {
+          const row = res.rows[0];
+          return {
+            id: row.id || 'sys-1',
+            businessName: row.business_name || systemSettings.businessName,
+            businessPhone: row.business_phone || systemSettings.businessPhone,
+            businessEmail: row.business_email || systemSettings.businessEmail,
+            currency: row.currency || systemSettings.currency,
+            timezone: row.timezone || systemSettings.timezone,
+            paymentProvider: row.payment_provider || systemSettings.paymentProvider,
+            palplussApiKey: row.palpluss_api_key || systemSettings.palplussApiKey,
+            palplussApiUrl: row.palpluss_api_url || systemSettings.palplussApiUrl,
+            palplussCallbackUrl: row.palpluss_callback_url || systemSettings.palplussCallbackUrl,
+            palplussMerchantId: row.palpluss_merchant_id || systemSettings.palplussMerchantId,
+            createdAt: row.created_at ? new Date(row.created_at).toISOString() : systemSettings.createdAt,
+            updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : systemSettings.updatedAt
+          };
+        }
+      } catch (err: any) {
+        console.error('DB getSystemSettings error, attempting self-healing migration:', err.message);
+        try {
+          await pool.query(`
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS business_name VARCHAR(150) DEFAULT 'WiFi Billing';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS business_phone VARCHAR(30) DEFAULT '';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS business_email VARCHAR(150) DEFAULT '';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) NOT NULL DEFAULT 'KES';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS timezone VARCHAR(100) NOT NULL DEFAULT 'Africa/Nairobi';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS payment_provider VARCHAR(50) DEFAULT 'palpluss';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS palpluss_api_key TEXT DEFAULT '';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS palpluss_api_url TEXT DEFAULT 'https://api.palpluss.com/v1';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS palpluss_callback_url TEXT DEFAULT '';
+            ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS palpluss_merchant_id TEXT DEFAULT '';
+          `);
+          const retryRes = await pool.query('SELECT * FROM system_settings LIMIT 1');
+          if (retryRes.rows[0]) {
+            const row = retryRes.rows[0];
+            return {
+              id: row.id || 'sys-1',
+              businessName: row.business_name || systemSettings.businessName,
+              businessPhone: row.business_phone || systemSettings.businessPhone,
+              businessEmail: row.business_email || systemSettings.businessEmail,
+              currency: row.currency || systemSettings.currency,
+              timezone: row.timezone || systemSettings.timezone,
+              paymentProvider: row.payment_provider || systemSettings.paymentProvider,
+              palplussApiKey: row.palpluss_api_key || systemSettings.palplussApiKey,
+              palplussApiUrl: row.palpluss_api_url || systemSettings.palplussApiUrl,
+              palplussCallbackUrl: row.palpluss_callback_url || systemSettings.palplussCallbackUrl,
+              palplussMerchantId: row.palpluss_merchant_id || systemSettings.palplussMerchantId,
+              createdAt: row.created_at ? new Date(row.created_at).toISOString() : systemSettings.createdAt,
+              updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : systemSettings.updatedAt
+            };
+          }
+        } catch (migrationErr) {
+          console.error('Self-healing migration failed:', migrationErr);
+        }
       }
     }
     return { ...systemSettings };

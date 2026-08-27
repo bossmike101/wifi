@@ -136,7 +136,12 @@ export const paymentService = {
     const sysSettings = await db.getSystemSettings();
     const apiKey = (sysSettings.palplussApiKey || process.env.PALPLUS_API_KEY || '').trim();
     const rawApiUrl = sysSettings.palplussApiUrl || process.env.PALPLUS_API_URL || 'https://api.palpluss.com/v1';
-    const callbackUrl = sysSettings.palplussCallbackUrl || process.env.PALPLUS_CALLBACK_URL;
+    const appUrl = (process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '');
+    const defaultCallbackUrl = `${appUrl}/api/payments/callback`;
+    let callbackUrl = (sysSettings.palplussCallbackUrl || process.env.PALPLUS_CALLBACK_URL || defaultCallbackUrl).trim();
+    if (!callbackUrl || callbackUrl.includes('localhost') || callbackUrl.includes('127.0.0.1')) {
+      callbackUrl = defaultCallbackUrl;
+    }
     const merchantId = sysSettings.palplussMerchantId?.trim();
 
     // If PalPluss API key is configured, invoke real PalPluss STK push endpoint
