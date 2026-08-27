@@ -1,0 +1,6 @@
+{
+  "name": "WiFi Billing System",
+  "description": "Production-ready single-owner MikroTik WiFi HotSpot billing system with captive portal, M-Pesa PalPluss integration, package management, and router synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
