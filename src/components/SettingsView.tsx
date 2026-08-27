@@ -331,7 +331,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <label className="block text-xs font-semibold text-[#a0a0a0] mb-1.5">Webhook / Callback URL</label>
               <input
                 type="text"
-                value={formData.palplussCallbackUrl || 'https://billing-system.vercel.app/api/payments/callback'}
+                value={formData.palplussCallbackUrl || 'https://wifisystem.vercel.app/api/payments/callback'}
                 onChange={(e) => setFormData({ ...formData, palplussCallbackUrl: e.target.value })}
                 className="w-full px-3.5 py-2.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl text-xs font-mono text-[#8a8a8a] focus:bg-[#202020] focus:border-[#c5a37f] focus:outline-hidden"
               />

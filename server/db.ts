@@ -365,11 +365,15 @@ export const db = {
   },
 
   async getPackageById(id: string): Promise<Package | null> {
+    if (!id) return null;
+    const cleanId = String(id).trim();
+
     if (pool) {
       try {
+        // 1. Direct ID match (UUID or text ID)
         const res = await pool.query(
           'SELECT id, name, price_kes AS "priceKes", duration_minutes AS "durationMinutes", device_limit AS "deviceLimit", is_active AS "isActive", created_at AS "createdAt", updated_at AS "updatedAt" FROM packages WHERE id::text = $1',
-          [id]
+          [cleanId]
         );
         if (res.rows[0]) {
           const r = res.rows[0];
@@ -380,12 +384,38 @@ export const db = {
             deviceLimit: Number(r.deviceLimit),
           };
         }
+
+        // 2. Numeric ordinal fallback (e.g. "1" matches 1st package)
+        const num = parseInt(cleanId, 10);
+        if (!isNaN(num) && num > 0 && String(num) === cleanId) {
+          const numRes = await pool.query(
+            'SELECT id, name, price_kes AS "priceKes", duration_minutes AS "durationMinutes", device_limit AS "deviceLimit", is_active AS "isActive", created_at AS "createdAt", updated_at AS "updatedAt" FROM packages ORDER BY created_at ASC OFFSET $1 LIMIT 1',
+            [num - 1]
+          );
+          if (numRes.rows[0]) {
+            const r = numRes.rows[0];
+            return {
+              ...r,
+              priceKes: Number(r.priceKes),
+              durationMinutes: Number(r.durationMinutes),
+              deviceLimit: Number(r.deviceLimit),
+            };
+          }
+        }
       } catch (err) {
         console.error('DB getPackageById error:', err);
       }
     }
-    const pkg = packages.find(p => p.id === id);
-    return pkg || null;
+
+    const pkg = packages.find(p => p.id === cleanId);
+    if (pkg) return pkg;
+
+    const num = parseInt(cleanId, 10);
+    if (!isNaN(num) && num > 0 && num <= packages.length) {
+      return packages[num - 1];
+    }
+
+    return null;
   },
 
   async createPackage(data: Omit<Package, 'id' | 'createdAt' | 'updatedAt'>): Promise<Package> {

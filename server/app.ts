@@ -184,15 +184,53 @@ app.delete('/api/packages/:id', async (req, res) => {
 // ----------------------------------------------------
 const handleInitiatePayment = async (req: express.Request, res: express.Response) => {
   try {
-    const { packageId, phoneNumber, macAddress } = req.body;
-    if (!packageId || !phoneNumber) {
-      return res.status(400).json({ error: 'Package ID and Phone Number are required.' });
+    const { packageId, phoneNumber, macAddress } = req.body || {};
+    
+    if (!packageId || typeof packageId !== 'string' || !packageId.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_REQUEST',
+        message: 'packageId is required in request body.'
+      });
     }
 
-    const result = await paymentService.initiatePayment({ packageId, phoneNumber, macAddress });
-    res.json(result);
+    if (!phoneNumber || typeof phoneNumber !== 'string' || !phoneNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'INVALID_PHONE',
+        message: 'phoneNumber is required in request body.'
+      });
+    }
+
+    const result = await paymentService.initiatePayment({
+      packageId: packageId.trim(),
+      phoneNumber: phoneNumber.trim(),
+      macAddress
+    });
+
+    return res.status(200).json(result);
   } catch (err: any) {
-    res.status(400).json({ error: err.message });
+    const errCode = err.code || (
+      err.message?.includes('credentials are not configured') 
+        ? 'PALPLUS_CONFIG_MISSING' 
+        : (err.message?.includes('not found') || err.message?.includes('inactive') || err.message?.includes('unavailable')
+          ? 'PACKAGE_NOT_FOUND' 
+          : (err.message?.includes('phone') 
+            ? 'INVALID_PHONE' 
+            : 'STK_PUSH_FAILED'))
+    );
+    
+    let statusCode = 400;
+    if (errCode === 'PACKAGE_NOT_FOUND') statusCode = 404;
+    else if (errCode === 'PALPLUS_CONFIG_MISSING') statusCode = 502;
+    else if (errCode === 'STK_PUSH_FAILED') statusCode = 502;
+
+    return res.status(statusCode).json({
+      success: false,
+      error: errCode,
+      message: err.message || 'Payment initiation failed.',
+      details: err.details || undefined
+    });
   }
 };
 
@@ -204,7 +242,7 @@ app.get('/api/payments/status/:reference', async (req, res) => {
     const payment = await paymentService.verifyPayment(req.params.reference);
     res.json(payment);
   } catch (err: any) {
-    res.status(404).json({ error: err.message });
+    res.status(404).json({ success: false, error: 'PAYMENT_NOT_FOUND', message: err.message });
   }
 });
 
@@ -215,7 +253,7 @@ app.all('/api/payments/callback', async (req, res) => {
       status: 'active',
       endpoint: '/api/payments/callback',
       message: 'PalPluss webhook callback endpoint is active and listening for POST notifications.',
-      productionUrl: `${(process.env.APP_URL || 'https://wifibilling.vercel.app').replace(/\/$/, '')}/api/payments/callback`,
+      productionUrl: `${(process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '')}/api/payments/callback`,
       timestamp: new Date().toISOString()
     });
   }
@@ -333,22 +371,6 @@ app.post('/api/payments/test-gateway', async (req, res) => {
   }
 });
 
-// Payment Simulation for local development & sandbox testing
-app.post('/api/payments/simulate-success', async (req, res) => {
-  try {
-    const { merchantReference } = req.body;
-    const result = await paymentService.processCallback({
-      merchantReference,
-      status: 'successful',
-      providerReference: `SIM-MPESA-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      providerTransactionId: `SIM-TXN-${Date.now()}`
-    });
-    res.json(result);
-  } catch (err: any) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
 app.get('/api/payments', async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 100;
@@ -460,11 +482,7 @@ app.post('/api/router/test-connection', handleTestRouter);
 
 app.post('/api/router/generate-script', async (req, res) => {
   try {
-    const routerSettings = await db.getRouterSettings();
-    const portalSettings = await db.getPortalSettings();
-    const systemSettings = await db.getSystemSettings();
-
-    const appUrl = (process.env.APP_URL || 'https://wifibilling.vercel.app').replace(/\/$/, '');
+    const appUrl = (process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '');
     const script = mikrotikService.generateSetupScript({
       hotspotInterface: 'wlan1',
       dnsName: 'wifi.login',
@@ -501,6 +519,26 @@ app.put('/api/settings', async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Global 404 handler for undefined API routes
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'NOT_FOUND',
+    message: `API route ${req.method} ${req.path} not found.`
+  });
+});
+
+// Global Express JSON Error Handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[API Unhandled Error]:', err);
+  const status = typeof err.status === 'number' ? err.status : 500;
+  res.status(status).json({
+    success: false,
+    error: err.code || 'INTERNAL_SERVER_ERROR',
+    message: err.message || 'An unexpected error occurred.'
+  });
 });
 
 export default app;

@@ -10,6 +10,9 @@ export function extractErrorMessage(data: any, fallback = 'Unable to initiate pa
     if (typeof data.error === 'string' && data.error.trim().length > 0) return data.error.trim();
     if (typeof data.detail === 'string' && data.detail.trim().length > 0) return data.detail.trim();
     if (typeof data.description === 'string' && data.description.trim().length > 0) return data.description.trim();
+    if (typeof data.ResponseDescription === 'string' && data.ResponseDescription.trim().length > 0) return data.ResponseDescription.trim();
+    if (typeof data.CustomerMessage === 'string' && data.CustomerMessage.trim().length > 0) return data.CustomerMessage.trim();
+    if (typeof data.errorMessage === 'string' && data.errorMessage.trim().length > 0) return data.errorMessage.trim();
     if (typeof data.msg === 'string' && data.msg.trim().length > 0) return data.msg.trim();
     if (typeof data.error_description === 'string' && data.error_description.trim().length > 0) return data.error_description.trim();
 
@@ -30,7 +33,7 @@ export function extractErrorMessage(data: any, fallback = 'Unable to initiate pa
     
     // Check if error has status or code description
     if (data.code && typeof data.code === 'string') {
-      return `Payment Error (${data.code})`;
+      return `Payment Gateway Error (${data.code})`;
     }
   }
 
@@ -110,33 +113,23 @@ export const paymentService = {
     // Validate and normalize phone to standard Kenyan format (2547XXXXXXXX / 2541XXXXXXXX)
     const normalizedPhone = normalizeKenyanPhoneNumber(phoneNumber);
     if (!normalizedPhone) {
-      throw new Error('Invalid Kenyan phone number. Please enter a valid number (e.g. 0712345678 or 0112345678).');
+      const err: any = new Error('Invalid Kenyan phone number format. Use 07XXXXXXXX, 01XXXXXXXX, or 254XXXXXXXXX.');
+      err.code = 'INVALID_PHONE';
+      throw err;
     }
 
     // Retrieve package from database to ensure genuine price
     const pkg = await db.getPackageById(packageId);
     if (!pkg || !pkg.isActive) {
-      throw new Error('Selected package is invalid or currently unavailable.');
+      const err: any = new Error(`Package with ID "${packageId}" not found or is currently inactive.`);
+      err.code = 'PACKAGE_NOT_FOUND';
+      throw err;
     }
-
-    // Generate unique merchant reference
-    const merchantReference = `WIFI-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-
-    // Create pending payment in database
-    const payment = await db.createPayment({
-      packageId: pkg.id,
-      packageName: pkg.name,
-      phoneNumber: normalizedPhone,
-      amountKes: pkg.priceKes,
-      status: 'pending',
-      provider: 'palpluss',
-      merchantReference: merchantReference,
-    });
 
     const sysSettings = await db.getSystemSettings();
     const apiKey = (sysSettings.palplussApiKey || process.env.PALPLUS_API_KEY || '').trim();
     const rawApiUrl = sysSettings.palplussApiUrl || process.env.PALPLUS_API_URL || 'https://api.palpluss.com/v1';
-    const appUrl = (process.env.APP_URL || 'https://wifibilling.vercel.app').replace(/\/$/, '');
+    const appUrl = (process.env.APP_URL || 'https://wifisystem.vercel.app').replace(/\/$/, '');
     const defaultCallbackUrl = `${appUrl}/api/payments/callback`;
     let callbackUrl = (sysSettings.palplussCallbackUrl || process.env.PALPLUS_CALLBACK_URL || defaultCallbackUrl).trim();
     if (!callbackUrl || callbackUrl.includes('localhost') || callbackUrl.includes('127.0.0.1')) {
@@ -144,119 +137,158 @@ export const paymentService = {
     }
     const merchantId = sysSettings.palplussMerchantId?.trim();
 
-    // If PalPluss API key is configured, invoke real PalPluss STK push endpoint
-    if (apiKey && apiKey.length > 5) {
-      const endpointUrl = resolvePalplussStkUrl(rawApiUrl);
-      console.log(`[PalPluss] Initiating STK Push to ${endpointUrl} for ${normalizedPhone}, amount: ${pkg.priceKes}`);
-
-      // Basic Auth encoding: base64(apiKey:) or as formatted
-      const basicAuthHeader = apiKey.startsWith('Basic ')
-        ? apiKey
-        : `Basic ${Buffer.from(apiKey.includes(':') ? apiKey : `${apiKey}:`).toString('base64')}`;
-
-      // Build standard PalPluss STK Push payload
-      const payload: Record<string, any> = {
-        amount: Math.round(Number(pkg.priceKes)),
-        phone: normalizedPhone,
-        phone_number: normalizedPhone,
-        accountReference: merchantReference,
-        account_reference: merchantReference,
-        reference: merchantReference,
-        transactionDesc: `WiFi ${pkg.name.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 13),
-        transaction_desc: `WiFi ${pkg.name.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 13),
-        description: `WiFi ${pkg.name.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 13),
-      };
-
-      if (callbackUrl && callbackUrl.startsWith('http')) {
-        payload.callbackUrl = callbackUrl;
-        payload.callback_url = callbackUrl;
-      }
-      if (merchantId) {
-        payload.channelId = merchantId;
-        payload.channel_id = merchantId;
-      }
-
-      try {
-        const response = await fetch(endpointUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Authorization': basicAuthHeader,
-            'X-API-Key': apiKey,
-            ...(merchantId ? { 'X-Merchant-Id': merchantId } : {})
-          },
-          body: JSON.stringify(payload)
-        });
-
-        const resText = await response.text();
-        let resData: any = null;
-        try {
-          resData = JSON.parse(resText);
-        } catch {
-          resData = { raw: resText };
-        }
-
-        const safeExtractedError = extractErrorMessage(resData, `Gateway error (HTTP ${response.status})`);
-
-        // Log structured sanitized info
-        console.log('[PalPluss Safe Log]', {
-          status: response.status,
-          merchantReference,
-          providerReference: resData?.transactionId || resData?.checkoutRequestId || resData?.id || 'N/A',
-          providerMessage: safeExtractedError
-        });
-
-        if (response.ok) {
-          const providerTxnId = resData.transactionId || 
-                                resData.transaction_id || 
-                                resData.id || 
-                                resData.data?.transactionId || 
-                                resData.checkoutRequestId || 
-                                resData.checkout_request_id || 
-                                resData.data?.id;
-
-          const providerRef = resData.providerCheckoutId || 
-                              resData.provider_checkout_id || 
-                              resData.checkoutRequestId || 
-                              resData.reference || 
-                              'PALPLUS-STK-SENT';
-
-          await db.updatePayment(merchantReference, {
-            providerReference: providerRef,
-            providerTransactionId: providerTxnId ? String(providerTxnId) : undefined
-          });
-
-          return {
-            success: true,
-            merchantReference,
-            message: 'STK push prompt sent to your phone. Please enter your M-Pesa PIN to complete payment.',
-            payment: {
-              ...payment,
-              providerReference: providerRef,
-              providerTransactionId: providerTxnId ? String(providerTxnId) : undefined
-            },
-            testMode: false
-          };
-        } else {
-          console.warn(`[PalPluss Error]: ${safeExtractedError}`);
-          throw new Error(`Payment Gateway Error: ${safeExtractedError}`);
-        }
-      } catch (err: any) {
-        const finalErrorMsg = extractErrorMessage(err, 'Failed to communicate with PalPluss payment gateway.');
-        console.error('[PalPluss STK Push Request Failed]:', finalErrorMsg);
-        throw new Error(finalErrorMsg);
-      }
+    // Verify PalPluss API credentials exist
+    if (!apiKey || apiKey.includes('your_api_key') || apiKey.length < 5) {
+      const err: any = new Error('PalPluss API credentials are not configured. Please add your valid PalPluss API Key in Admin Settings before initiating STK push.');
+      err.code = 'PALPLUS_CONFIG_MISSING';
+      throw err;
     }
 
-    // If no API key configured, return pending with simulation readiness
-    return {
-      success: true,
-      merchantReference,
-      message: 'Payment request initiated. Check your phone and enter your M-Pesa PIN.',
-      payment,
-      testMode: true
+    // Generate unique merchant reference
+    const merchantReference = `WIFI-${Date.now().toString().slice(-6)}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+    // Create pending payment in database (Never marks successful prematurely)
+    const payment = await db.createPayment({
+      packageId: pkg.id,
+      packageName: pkg.name,
+      phoneNumber: normalizedPhone,
+      amountKes: Number(pkg.priceKes),
+      status: 'pending',
+      provider: 'palpluss',
+      merchantReference: merchantReference,
+    });
+
+    const endpointUrl = resolvePalplussStkUrl(rawApiUrl);
+    const maskedPhone = normalizedPhone.length >= 7 
+      ? `${normalizedPhone.slice(0, 6)}****${normalizedPhone.slice(-3)}`
+      : '****';
+
+    console.log(`[PalPluss] Initiating STK Push to ${endpointUrl} for ${maskedPhone}, amount: ${pkg.priceKes}`);
+
+    // PalPluss uses HTTP Basic Auth with API Key as the username and empty password
+    const basicAuthHeader = apiKey.startsWith('Basic ')
+      ? apiKey
+      : `Basic ${Buffer.from(apiKey.includes(':') ? apiKey : `${apiKey}:`).toString('base64')}`;
+
+    // Build standard PalPluss STK Push payload with exact DB package price
+    const payload: Record<string, any> = {
+      amount: Math.round(Number(pkg.priceKes)),
+      phone: normalizedPhone,
+      phone_number: normalizedPhone,
+      accountReference: merchantReference,
+      account_reference: merchantReference,
+      reference: merchantReference,
+      callbackUrl: callbackUrl,
+      callback_url: callbackUrl,
+      transactionDesc: `WiFi ${pkg.name.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 13) || 'WiFi Access',
+      transaction_desc: `WiFi ${pkg.name.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 13) || 'WiFi Access',
+      description: `WiFi ${pkg.name.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 13) || 'WiFi Access',
     };
+
+    if (merchantId && merchantId.trim()) {
+      payload.channelId = merchantId.trim();
+      payload.channel_id = merchantId.trim();
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Authorization': basicAuthHeader,
+        'X-API-Key': apiKey,
+      };
+      if (merchantId && merchantId.trim()) {
+        headers['X-Merchant-Id'] = merchantId.trim();
+      }
+
+      const response = await fetch(endpointUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      const resText = await response.text();
+      let resData: any = null;
+      try {
+        resData = JSON.parse(resText);
+      } catch {
+        resData = { raw: resText };
+      }
+
+      let safeExtractedError = extractErrorMessage(resData, `Gateway error (HTTP ${response.status})`);
+      if (response.status === 401) {
+        safeExtractedError = 'PalPluss authentication failed. Check your API key in Settings.';
+      } else if (response.status === 402 || (typeof safeExtractedError === 'string' && safeExtractedError.toLowerCase().includes('wallet') && safeExtractedError.toLowerCase().includes('balance'))) {
+        safeExtractedError = 'PalPluss Service Wallet balance is insufficient to cover transaction fees. Please fund your wallet in PalPluss.';
+      }
+
+      if (response.ok) {
+        const providerTxnId = resData.transactionId || 
+                              resData.transaction_id || 
+                              resData.id || 
+                              resData.data?.transactionId || 
+                              resData.checkoutRequestId || 
+                              resData.checkout_request_id || 
+                              resData.data?.id;
+
+        const providerRef = resData.providerCheckoutId || 
+                            resData.provider_checkout_id || 
+                            resData.checkoutRequestId || 
+                            resData.reference || 
+                            'PALPLUS-STK-SENT';
+
+        await db.updatePayment(merchantReference, {
+          providerReference: providerRef,
+          providerTransactionId: providerTxnId ? String(providerTxnId) : undefined
+        });
+
+        return {
+          success: true,
+          merchantReference,
+          message: 'STK push prompt sent to your phone. Please enter your M-Pesa PIN to complete payment.',
+          payment: {
+            ...payment,
+            providerReference: providerRef,
+            providerTransactionId: providerTxnId ? String(providerTxnId) : undefined
+          }
+        };
+      } else {
+        // Safe server diagnostic logging
+        console.log('[STK PUSH ERROR]', {
+          timestamp: new Date().toISOString(),
+          packageId: pkg.id,
+          amount: pkg.priceKes,
+          phone: maskedPhone,
+          merchantReference,
+          callbackUrl,
+          providerStatus: response.status,
+          providerResponse: safeExtractedError
+        });
+
+        const err: any = new Error(`PalPluss Gateway Error: ${safeExtractedError}`);
+        err.code = 'STK_PUSH_FAILED';
+        err.details = {
+          providerStatus: response.status,
+          merchantReference
+        };
+        throw err;
+      }
+    } catch (err: any) {
+      if (err.code) throw err;
+      const finalErrorMsg = extractErrorMessage(err, 'Failed to communicate with PalPluss payment gateway.');
+      console.log('[STK PUSH ERROR]', {
+        timestamp: new Date().toISOString(),
+        packageId: pkg.id,
+        amount: pkg.priceKes,
+        phone: maskedPhone,
+        merchantReference,
+        callbackUrl,
+        internalError: finalErrorMsg
+      });
+      const customErr: any = new Error(finalErrorMsg);
+      customErr.code = 'STK_PUSH_FAILED';
+      throw customErr;
+    }
   },
 
   /**

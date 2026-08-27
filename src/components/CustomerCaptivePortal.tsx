@@ -63,23 +63,22 @@ export const CustomerCaptivePortal: React.FC<CustomerCaptivePortalProps> = ({
 
     setIsInitiating(true);
     try {
-      const res = await fetch('/api/payments/initiate', {
+      const res = await fetch('/api/payments/stk-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           packageId: selectedPackage.id,
-          phoneNumber: phoneNumber,
-          macAddress: '00:1A:2B:3C:4D:5E' // Simulated / router-injected MAC
+          phoneNumber: phoneNumber
         })
       });
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        let errStr = 'Failed to initiate payment.';
-        if (typeof data.error === 'string') {
-          errStr = data.error;
-        } else if (typeof data.message === 'string') {
+      if (!res.ok || !data.success) {
+        let errStr = 'Failed to initiate STK push.';
+        if (typeof data.message === 'string') {
           errStr = data.message;
+        } else if (typeof data.error === 'string') {
+          errStr = data.error;
         } else if (data.error && typeof data.error.message === 'string') {
           errStr = data.error.message;
         }
@@ -129,28 +128,6 @@ export const CustomerCaptivePortal: React.FC<CustomerCaptivePortalProps> = ({
 
     return () => clearInterval(interval);
   }, [isPolling, activePayment]);
-
-  // Simulate payment completion for quick testing
-  const handleSimulatePaymentSuccess = async () => {
-    if (!activePayment) return;
-    try {
-      const res = await fetch('/api/payments/simulate-success', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ merchantReference: activePayment.merchantReference })
-      });
-      const data = await res.json();
-      if (data.session) {
-        setActiveSession(data.session);
-      }
-      setIsPolling(false);
-      if (data.payment) {
-        setActivePayment(data.payment);
-      }
-    } catch (err: any) {
-      setPaymentError(err.message);
-    }
-  };
 
   return (
     <div 
@@ -256,17 +233,6 @@ export const CustomerCaptivePortal: React.FC<CustomerCaptivePortalProps> = ({
                 <span>2. Enter your 4-digit M-Pesa PIN and press OK.</span>
               </p>
               <p className="text-[#a88255]">Internet access will automatically activate the moment payment confirms.</p>
-            </div>
-
-            {/* Simulated verification helper for instant testing */}
-            <div className="pt-2 border-t border-[#242424]">
-              <button
-                onClick={handleSimulatePaymentSuccess}
-                className="w-full py-2.5 px-3 bg-[#132014] hover:bg-[#1c301d] text-[#8fa876] border border-[#223d24] rounded-xl text-xs font-bold transition-colors flex items-center justify-center space-x-1.5"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Simulate M-Pesa Payment Success (Instant Access)</span>
-              </button>
             </div>
 
             <button
